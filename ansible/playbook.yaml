@@ -1,0 +1,129 @@
+---
+- name: Deploy nhsite blue
+  hosts: localhost
+  become: true
+  vars:
+    port_num: 80
+    phprepo: /home/arafa/packer-ansible-project/artifacts/repo.list
+    itemx: /home/arafa/packer-ansible-project/artifacts/db-sql.sql
+    mysql_db_name: "nhdb"
+    mysql_db_user: "root"
+    mysql_db_password: "some_pass"
+
+  tasks:
+    - name: Copy php repo file
+      ansible.builtin.copy:
+        src: "{{ phprepo }}"
+        dest: /etc/apt/sources.list.d/ondrej-ubuntu-php-noble.sources
+        owner: root
+        group: root
+        mode: 640
+
+    - name: software-properties-common
+      apt: name=software-properties-common
+
+    - name: "Update repo"
+      apt: update_cache=yes
+
+    - name: Install PHP 8.2
+      apt: name=php8.2 state=present
+
+    - name: install lamp stack
+      apt:
+        pkg:
+          - php-mysql
+          - php-curl
+          - php-json
+          - php-cgi
+          - php-gd
+          - php-mbstring
+          - php-zip
+          - php-xmlrpc
+          - php-soap
+          - php-intl
+          - php-cgi
+          - libapache2-mod-php8.2
+          - libxslt-dev
+        state: present
+        update_cache: yes
+
+    - name: Install Apache
+      ansible.builtin.apt:
+        name: apache2
+        state: present
+
+    - name: Installing Mysql
+      package:
+        name: "{{item}}"
+        state: present
+        update_cache: yes
+      loop:
+        - mysql-server
+        - mysql-client
+        - python3-mysqldb
+        - libmysqlclient-dev
+
+    - name: Extract artifacts
+      ansible.builtin.unarchive:
+        src: /home/arafa/packer-ansible-project/artifacts/nhsite.tar
+        dest: /
+        mode: "0755"
+
+    - name: Copy Apache site config
+      ansible.builtin.template:
+        src: /home/arafa/packer-ansible-project/artifacts/templates/nhsite.conf.j2
+        dest: /etc/apache2/sites-available/nhsite.conf
+        mode: "0644"
+
+    - name: Enable nhsite
+      ansible.builtin.command:
+        cmd: a2ensite nhsite.conf
+      notify: restart apache2
+
+    - name: Remove file
+      ansible.builtin.file:
+        path: "/etc/apache2/sites-available/000-default.conf"
+        state: absent
+      notify: restart apache2
+
+    - name: Creates directory
+      ansible.builtin.file:
+        path: /var/lib/mysql
+        state: directory
+
+    - name: Extract database
+      ansible.builtin.copy:
+        src: "{{ itemx }}"
+        dest: "/"
+        mode: 0755
+
+    - name: Copy sql file
+      ansible.builtin.copy:
+        src: "{{ itemx }}"
+        dest: /var/lib/mysql/db-sql.sql
+        owner: root
+        group: root
+        mode: 640
+
+    - name: Ensure Apache is started and enabled
+      ansible.builtin.service:
+        name: apache2
+        state: started
+        enabled: true
+
+    - name: Start mysql service
+      ansible.builtin.service:
+        name: mysql
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: restart apache2
+      ansible.builtin.service:
+        name: apache2
+        state: restarted
+
+    - name: restart mysql
+      ansible.builtin.service:
+        name: mysql
+        state: restarted
